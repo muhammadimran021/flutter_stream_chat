@@ -1,18 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:stream_chat_flutter/stream_chat_flutter.dart';
+
 import 'core/constants/app_constants.dart';
 import 'core/di/injection_container.dart' as di;
+import 'core/utils/audio_session_helper.dart';
+import 'core/theme/stream_chat_theme.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
 import 'features/auth/presentation/pages/auth_page.dart';
-import 'features/chat/presentation/pages/chat_home_page.dart';
+import 'features/chat/presentation/pages/main_navigation_page.dart';
+import 'features/chat/presentation/cubit/navigation_cubit.dart';
+import 'features/chat/presentation/bloc/user_search_bloc.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize dependency injection
   await di.init();
-  
+
+  // Configure audio session for voice recording
+  await AudioSessionHelper.configureAudioSession();
+
   runApp(const MyApp());
 }
 
@@ -29,10 +37,7 @@ class MyApp extends StatelessWidget {
       ],
       child: MaterialApp(
         title: 'Stream Chat',
-        theme: ThemeData(
-          primarySwatch: Colors.blue,
-          useMaterial3: true,
-        ),
+        theme: StreamChatAppTheme.lightTheme,
         home: const AuthWrapper(),
         debugShowCheckedModeBanner: false,
       ),
@@ -51,9 +56,7 @@ class AuthWrapper extends StatelessWidget {
           return _buildChatApp(context, state.user);
         } else if (state is AuthLoading) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
+            body: Center(child: CircularProgressIndicator()),
           );
         } else {
           return const AuthPage();
@@ -63,19 +66,25 @@ class AuthWrapper extends StatelessWidget {
   }
 
   Widget _buildChatApp(BuildContext context, user) {
-    final client = StreamChatClient(
-      AppConstants.streamApiKey,
-      logLevel: Level.INFO,
-    );
+    // Check if client is already registered
+    StreamChatClient client;
+    try {
+      client = di.sl<StreamChatClient>();
+    } catch (e) {
+      // Client not registered yet, create and register it
+      client = StreamChatClient(
+        AppConstants.streamApiKey,
+        logLevel: Level.INFO,
+      );
+      di.sl.registerSingleton<StreamChatClient>(client);
+    }
 
     return FutureBuilder<String?>(
       future: _connectUserToStream(client, user),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
+            body: Center(child: CircularProgressIndicator()),
           );
         }
 
@@ -101,7 +110,24 @@ class AuthWrapper extends StatelessWidget {
 
         return StreamChat(
           client: client,
-          child: const ChatHomePage(),
+          child: StreamChatTheme(
+            data: StreamChatThemeData(), // Or customize it
+            child: MultiBlocProvider(
+              providers: [
+                BlocProvider<NavigationCubit>(
+                  create: (context) => di.sl<NavigationCubit>(),
+                ),
+                BlocProvider<UserSearchBloc>(
+                  create: (context) => di.sl<UserSearchBloc>(),
+                ),
+              ],
+              child: MaterialApp(
+                debugShowCheckedModeBanner: false,
+                theme: StreamChatAppTheme.lightTheme,
+                home: const MainNavigationPage(),
+              ),
+            ),
+          ),
         );
       },
     );
@@ -110,10 +136,7 @@ class AuthWrapper extends StatelessWidget {
   Future<String?> _connectUserToStream(StreamChatClient client, user) async {
     try {
       await client.connectUser(
-        User(
-          id: user.id,
-          extraData: {'name': user.username},
-        ),
+        User(id: user.id, extraData: {'name': user.username}),
         user.streamToken!,
       );
       return user.streamToken;

@@ -30,7 +30,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  stream_chat_flutter: ^8.0.0
+  stream_chat_flutter: ^9.15.0
   http: ^1.2.1
   flutter_image_gallery_saver: ^0.0.2
   
@@ -55,6 +55,10 @@ dependencies:
   
   # Portal for Stream Chat
   flutter_portal: ^1.1.4
+  
+  # Audio handling
+  permission_handler: ^11.3.1
+  audio_session: ^0.1.25
 
 dependency_overrides:
   image_gallery_saver_plus: ^4.0.0

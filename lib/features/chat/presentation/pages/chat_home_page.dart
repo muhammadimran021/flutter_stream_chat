@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_stream_chat/features/chat/presentation/pages/thread_page.dart';
 import 'package:stream_chat_flutter/stream_chat_flutter.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
-import 'package:flutter_portal/flutter_portal.dart';
+import '../widgets/custom_message_input.dart';
 
 class ChatHomePage extends StatefulWidget {
   const ChatHomePage({super.key});
@@ -15,7 +16,7 @@ class _ChatHomePageState extends State<ChatHomePage> {
   late final _listController = StreamChannelListController(
     client: StreamChat.of(context).client,
     filter: Filter.in_('members', [StreamChat.of(context).currentUser!.id]),
-    channelStateSort: const [SortOption('last_message_at')],
+    channelStateSort: const [SortOption.desc('last_message_at')],
     limit: 20,
   );
 
@@ -27,45 +28,39 @@ class _ChatHomePageState extends State<ChatHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamChatTheme(
-      data: StreamChatThemeData.light(),
-      child: Portal(
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text('Stream Chat'),
-            backgroundColor: Colors.blue[600],
-            foregroundColor: Colors.white,
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.logout),
-                onPressed: () {
-                  context.read<AuthBloc>().add(SignOutRequested());
-                },
-              ),
-            ],
-          ),
-          body: StreamChannelListView(
-            controller: _listController,
-            onChannelTap: (channel) {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) {
-                    return StreamChannel(
-                      channel: channel,
-                      child: const ChannelPage(),
-                    );
-                  },
-                ),
-              );
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Chats'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () {
+              context.read<AuthBloc>().add(SignOutRequested());
             },
           ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: () => _showCreateChannelDialog(context),
-            backgroundColor: Colors.blue[600],
-            foregroundColor: Colors.white,
-            child: const Icon(Icons.add),
-          ),
-        ),
+        ],
+      ),
+      body: StreamChannelListView(
+        controller: _listController,
+        onChannelTap: (channel) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) {
+                return StreamChannel(
+                  channel: channel,
+                  child: const ChannelPage(),
+                );
+              },
+            ),
+          );
+        },
+        onChannelLongPress: (channel) {
+          _showChannelOptionsDialog(context, channel);
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showCreateChannelDialog(context),
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -123,8 +118,8 @@ class _ChatHomePageState extends State<ChatHomePage> {
 
   void _createChannel(String channelName, String memberIds) {
     final client = StreamChat.of(context).client;
-    final currentUserId = client.state.currentUser!.extraData['name'] as String;
-    
+    final currentUserId = client.state.currentUser!.id; // Use ID instead of name
+
     final members = [currentUserId];
     if (memberIds.isNotEmpty) {
       members.addAll(
@@ -132,38 +127,145 @@ class _ChatHomePageState extends State<ChatHomePage> {
       );
     }
 
+    // Sort members to ensure consistent channel ID
+    members.sort();
     final channelId = 'group_${members.join('_')}';
-    
+
     final channel = client.channel(
       'messaging',
       id: channelId,
       extraData: {
         'name': channelName,
         'image': 'https://example.com/group.png',
-        'members': members,
       },
     );
-    
-    channel.watch();
+
+    // Watch the channel and add members
+    channel.watch().then((_) {
+      channel.addMembers(members);
+    });
   }
-}
 
-class ChannelPage extends StatelessWidget {
-  const ChannelPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamChatTheme(
-      data: StreamChatThemeData.light(),
-      child: Scaffold(
-        appBar: const StreamChannelHeader(),
-        body: Column(
-          children: const <Widget>[
-            Expanded(child: StreamMessageListView()),
-            StreamMessageInput(),
+  void _showChannelOptionsDialog(BuildContext context, Channel channel) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text('Delete Channel', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.of(context).pop();
+                _showDeleteConfirmationDialog(context, channel);
+              },
+            ),
           ],
         ),
       ),
     );
   }
-} 
+
+  void _showDeleteConfirmationDialog(BuildContext context, Channel channel) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Channel'),
+        content: Text(
+          'Are you sure you want to delete "${channel.name ?? channel.id}"? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _deleteChannel(channel);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteChannel(Channel channel) async {
+    try {
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(width: 16),
+              Text('Deleting channel...'),
+            ],
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      // Delete the channel
+      await channel.delete();
+
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Channel "${channel.name ?? channel.id}" deleted successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete channel: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+}
+
+class ChannelPage extends StatelessWidget {
+  const ChannelPage({
+    super.key,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: StreamChannelHeader(),
+      body: Column(
+        children: <Widget>[
+          Expanded(
+            child: StreamMessageListView(
+              threadBuilder: (_, parentMessage) {
+                return ThreadPage(
+                  parent: parentMessage!,
+                );
+              },
+            ),
+          ),
+          const CustomMessageInput(),
+        ],
+      ),
+    );
+  }
+
+}
