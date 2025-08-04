@@ -224,41 +224,20 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
     try {
       final client = StreamChat.of(context).client;
       final currentUser = client.state.currentUser!;
-
-      // Create a consistent channel ID that's the same for both users
-      final memberIds = [currentUser.id, user.id];
-      memberIds.sort(); // Sort to ensure consistent order
+      final memberIds = [currentUser.id, user.id]..sort(); // consistent order
       final channelId = memberIds.join('-');
 
-      // Check if channel already exists
-      Channel? existingChannel;
-      try {
-        existingChannel = client.channel(
-          'messaging',
-          id: channelId,
-        );
-        await existingChannel.watch();
-      } catch (e) {
-        // Channel doesn't exist, create new one
-        existingChannel = null;
-      }
+      // Create or get the channel with members
+      final channel = client.channel(
+        'messaging',
+        id: channelId,
+        extraData: {
+          'members': memberIds,
+        },
+      );
 
-      Channel channel;
-      if (existingChannel != null && existingChannel.state != null) {
-        // Use existing channel
-        channel = existingChannel;
-      } else {
-        // Create a new direct message channel
-        channel = client.channel(
-          'messaging',
-          id: channelId,
-          extraData: {
-            'members': [currentUser.id, user.id],
-          },
-        );
-
-        await channel.watch();
-      }
+      // Safely watch the channel (creates it if it doesn't exist)
+      await channel.watch();
 
       // Navigate to the chat
       if (mounted) {
@@ -280,6 +259,7 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
       }
     }
   }
+
 }
 
 class ChannelPage extends StatelessWidget {
@@ -291,7 +271,11 @@ class ChannelPage extends StatelessWidget {
       appBar: StreamChannelHeader(),
       body: Column(
         children: <Widget>[
-          Expanded(child: StreamMessageListView()),
+          Expanded(
+            child: StreamMessageListView(
+              messageFilter: (message) => message.parentId == null, // Hide threaded messages
+            ),
+          ),
           const CustomMessageInput(),
         ],
       ),

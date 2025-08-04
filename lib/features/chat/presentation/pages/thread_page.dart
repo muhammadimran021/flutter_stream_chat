@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:stream_chat_flutter/stream_chat_flutter.dart';
 
@@ -14,20 +13,35 @@ class ThreadPage extends StatelessWidget {
     return StreamChannel(
       channel: channel,
       child: Scaffold(
-        appBar: StreamThreadHeader(
-          parent: parent,
-        ),
+        appBar: StreamThreadHeader(parent: parent),
         body: Column(
           children: [
-            Expanded(
-              child: StreamMessageListView(
-                parentMessage: parent,
-              ),
-            ),
+            Expanded(child: StreamMessageListView(parentMessage: parent)),
             StreamMessageInput(
+              onMessageSent: (messageText) {
+                sendThreadedMessage(
+                  channel,
+                  parent.id,
+                  messageText.text.toString(),
+                );
+              },
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> sendThreadedMessage(
+    Channel channel,
+    String parentMessageId,
+    String text,
+  ) async {
+    await channel.sendMessage(
+      Message(
+        showInChannel: false,
+        parentId: parentMessageId, // Associates with the parent message
+        text: text,
       ),
     );
   }

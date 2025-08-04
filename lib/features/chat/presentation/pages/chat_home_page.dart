@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_stream_chat/features/chat/presentation/pages/thread_page.dart';
 import 'package:stream_chat_flutter/stream_chat_flutter.dart';
+
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../widgets/custom_message_input.dart';
 
@@ -55,6 +56,20 @@ class _ChatHomePageState extends State<ChatHomePage> {
           );
         },
         onChannelLongPress: (channel) {
+          var isCurrentUserIsAdmin = false;
+          final isOneToOne = channel.state?.members.length == 2;
+
+          for (final member in channel.state?.members ?? []) {
+            final isAdmin = member.role == 'admin';
+            if (member.user?.id == StreamChat.of(context).currentUser?.id &&
+                isAdmin) {
+              isCurrentUserIsAdmin = isAdmin;
+              break;
+            }
+          }
+          if (!isCurrentUserIsAdmin && !isOneToOne) {
+            return;
+          }
           _showChannelOptionsDialog(context, channel);
         },
       ),
@@ -118,12 +133,16 @@ class _ChatHomePageState extends State<ChatHomePage> {
 
   void _createChannel(String channelName, String memberIds) {
     final client = StreamChat.of(context).client;
-    final currentUserId = client.state.currentUser!.id; // Use ID instead of name
+    final currentUserId =
+        client.state.currentUser!.id; // Use ID instead of name
 
     final members = [currentUserId];
     if (memberIds.isNotEmpty) {
       members.addAll(
-        memberIds.split(',').map((id) => id.trim()).where((id) => id.isNotEmpty),
+        memberIds
+            .split(',')
+            .map((id) => id.trim())
+            .where((id) => id.isNotEmpty),
       );
     }
 
@@ -156,7 +175,10 @@ class _ChatHomePageState extends State<ChatHomePage> {
           children: [
             ListTile(
               leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('Delete Channel', style: TextStyle(color: Colors.red)),
+              title: const Text(
+                'Delete Channel',
+                style: TextStyle(color: Colors.red),
+              ),
               onTap: () {
                 Navigator.of(context).pop();
                 _showDeleteConfirmationDialog(context, channel);
@@ -217,14 +239,25 @@ class _ChatHomePageState extends State<ChatHomePage> {
         ),
       );
 
-      // Delete the channel
-      await channel.delete();
+      final isOneToOne = channel.state?.members.length == 2;
+      if (isOneToOne) {
+        final channel1 = StreamChat.of(context).client.channel(
+          'messaging',
+          id: channel.id, // channel id of the one-on-one or group chat
+        );
+        await channel1.delete();
+      } else {
+        // Delete the channel
+        await channel.delete();
+      }
 
       // Show success message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Channel "${channel.name ?? channel.id}" deleted successfully'),
+            content: Text(
+              'Channel "${channel.name ?? channel.id}" deleted successfully',
+            ),
             backgroundColor: Colors.green,
           ),
         );
@@ -244,9 +277,8 @@ class _ChatHomePageState extends State<ChatHomePage> {
 }
 
 class ChannelPage extends StatelessWidget {
-  const ChannelPage({
-    super.key,
-  });
+  const ChannelPage({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -255,10 +287,9 @@ class ChannelPage extends StatelessWidget {
         children: <Widget>[
           Expanded(
             child: StreamMessageListView(
+              messageFilter: (message) => message.parentId == null,
               threadBuilder: (_, parentMessage) {
-                return ThreadPage(
-                  parent: parentMessage!,
-                );
+                return ThreadPage(parent: parentMessage!);
               },
             ),
           ),
@@ -267,5 +298,4 @@ class ChannelPage extends StatelessWidget {
       ),
     );
   }
-
 }
